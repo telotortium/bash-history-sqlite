@@ -1,6 +1,6 @@
 #!/bin/bash
 
-HISTSESSION=`dd if=/dev/urandom bs=32 count=1 2>/dev/null | base64`
+HISTSESSION=$(dd if=/dev/urandom bs=32 count=1 2>/dev/null | base64)
 
 # This utility requires bash-preexec to function, so get it.
 # n.b. we presume cwd is ~
@@ -10,9 +10,10 @@ then
     curl -s -o ${HOME}/.bash-preexec.sh 'https://raw.githubusercontent.com/rcaloras/bash-preexec/master/bash-preexec.sh' 2> /dev/null
 fi
 source ${HOME}/.bash-preexec.sh
+. ~/.bash-preexec.sh || echo "Missing bash-preexec" 1>&2
 
 # header guard
-[ -n "$_SQLITE_HIST" ] && return || readonly _SQLITE_HIST=1
+if [ -n "$_SQLITE_HIST" ]; then return; else readonly _SQLITE_HIST=1; fi
 
 
 # Let's define some utility functions
