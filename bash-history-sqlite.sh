@@ -69,7 +69,7 @@ preexec_bash_history_sqlite() {
 	__create_histdb
 
 	local quotedloginsession
-	if [[ -n "${LOGINSESSION}" ]]; then
+	if [[ -n "${LOGINSESSION:-}" ]]; then
 		quotedloginsession=$(__quote_str "$LOGINSESSION")
 	else
 		quotedloginsession="NULL"
