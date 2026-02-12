@@ -42,6 +42,16 @@ __quote_str() {
 	quoted="'$(echo "$str" | sed -e "s/'/''/g")'"
 	echo "$quoted"
 }
+
+__histdb_now_ms() {
+	local ts
+	ts="$(date +%s%3N 2>/dev/null || true)"
+	if [[ "$ts" == *N ]]; then
+		ts="$(( $(date +%s) * 1000 ))"
+	fi
+	echo "$ts"
+}
+
 __create_histdb() {
 	if bash -c "set -o noclobber; > \"$HISTDB\" ;" &> /dev/null; then
 		sqlite3 "$HISTDB" <<-EOD
@@ -60,33 +70,68 @@ __create_histdb() {
 	fi
 }
 
+__histdb_insert_command() {
+	[[ -z ${HISTDB:-} ]] && return 1
+	command -v sqlite3 >/dev/null 2>&1 || return 1
+
+	local cmd cwd shellsession loginsession quotedloginsession quotedshellsession
+	cmd="$1"
+	cwd="${2:-$PWD}"
+	shellsession="${3:-${HISTSESSION:-}}"
+	loginsession="${4:-${LOGINSESSION:-}}"
+
+	__create_histdb
+
+	if [[ -n "$shellsession" ]]; then
+		quotedshellsession=$(__quote_str "$shellsession")
+	else
+		quotedshellsession="NULL"
+	fi
+	if [[ -n "$loginsession" ]]; then
+		quotedloginsession=$(__quote_str "$loginsession")
+	else
+		quotedloginsession="NULL"
+	fi
+
+	sqlite3 "$HISTDB" <<-EOD
+		INSERT INTO command (shell, command, cwd, started, shellsession, loginsession)
+		VALUES (
+			'bash',
+			$(__quote_str "$cmd"),
+			$(__quote_str "$cwd"),
+			'$(__histdb_now_ms)',
+			$quotedshellsession,
+			$quotedloginsession
+		);
+		SELECT last_insert_rowid();
+	EOD
+}
+
+__histdb_finish_command() {
+	[[ -z ${HISTDB:-} ]] && return 0
+	[[ -z ${1:-} ]] && return 0
+	command -v sqlite3 >/dev/null 2>&1 || return 0
+
+	local command_id ret_value
+	command_id="$1"
+	ret_value="${2:-0}"
+
+	__create_histdb
+	sqlite3 "$HISTDB" <<-EOD
+		UPDATE command SET
+			ended='$(__histdb_now_ms)',
+			return=$ret_value
+		WHERE
+			command_id=$command_id ;
+	EOD
+}
+
 preexec_bash_history_sqlite() {
 	[[ -z ${HISTDB} ]] && return 0
 	local cmd
 	cmd="$1"
 
-	#atomic create file if not exist
-	__create_histdb
-
-	local quotedloginsession
-	if [[ -n "${LOGINSESSION:-}" ]]; then
-		quotedloginsession=$(__quote_str "$LOGINSESSION")
-	else
-		quotedloginsession="NULL"
-	fi
-	LASTHISTID="$(sqlite3 "$HISTDB" <<-EOD
-		INSERT INTO command (shell, command, cwd, started, shellsession, loginsession)
-		VALUES (
-			'bash',
-			$(__quote_str "$cmd"),
-			$(__quote_str "$PWD"),
-			'$(date +%s%3N)',
-			$(__quote_str "$HISTSESSION"),
-			$quotedloginsession
-		);
-		SELECT last_insert_rowid();
-		EOD
-	)"
+	LASTHISTID="$(__histdb_insert_command "$cmd" "$PWD" "${HISTSESSION:-}" "${LOGINSESSION:-}")"
 
 	echo "$cmd" >> ~/.testlog
 }
@@ -94,14 +139,7 @@ preexec_bash_history_sqlite() {
 precmd_bash_history_sqlite() {
 	local ret_value="$?"
 	if [[ -n "${LASTHISTID}" ]]; then
-		__create_histdb
-		sqlite3 "$HISTDB" <<- EOD
-			UPDATE command SET
-				ended='$(date +%s%3N)',
-				return=$ret_value
-			WHERE
-				command_id=$LASTHISTID ;
-		EOD
+		__histdb_finish_command "$LASTHISTID" "$ret_value"
 	fi
 }
 
